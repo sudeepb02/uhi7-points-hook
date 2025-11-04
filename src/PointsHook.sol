@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
-import {ERC1155} from "solmate/src/tokens/ERC1155.sol";
+import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 import {Currency} from "v4-core/types/Currency.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
@@ -14,11 +14,29 @@ import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 
-contract PointsHook is BaseHook, ERC1155 {
-    constructor(IPoolManager _manager) BaseHook(_manager) {}
+contract RewardToken is ERC20 {
+    address public owner;
+    constructor(
+        string memory _name,
+        string memory _symbol,
+        uint8 _decimals
+    ) ERC20(_name, _symbol, _decimals) {
+        owner = msg.sender;
+    }
 
-    // Set up hook permissions to return `true`
-    // for the two hook functions we are using
+    function mint(address to, uint256 amount) external {
+        require(msg.sender == owner, "Only owner can mint");
+        _mint(to, amount);
+    }
+}
+
+contract PointsHook is BaseHook {
+    RewardToken public immutable rewardToken;
+
+    constructor(IPoolManager _manager) BaseHook(_manager) {
+        rewardToken = new RewardToken("Reward Token", "RWT", 18);
+    }
+
     function getHookPermissions()
         public
         pure
@@ -44,12 +62,6 @@ contract PointsHook is BaseHook, ERC1155 {
             });
     }
 
-    // Implement the ERC1155 `uri` function
-    function uri(uint256) public view virtual override returns (string memory) {
-        return "https://api.example.com/token/{id}";
-    }
-
-    // Stub implementation of `afterSwap`
     function _afterSwap(
         address,
         PoolKey calldata key,
@@ -66,22 +78,17 @@ contract PointsHook is BaseHook, ERC1155 {
         uint256 ethAmount = uint256(int256(-delta.amount0()));
         uint256 totalPoints = (20 * ethAmount) / 100;
 
-        _assignPoints(key.toId(), hookData, totalPoints);
+        _assignPoints(hookData, totalPoints);
 
         return (this.afterSwap.selector, 0);
     }
 
-    function _assignPoints(
-        PoolId poolId,
-        bytes calldata hookData,
-        uint256 points
-    ) internal {
+    function _assignPoints(bytes calldata hookData, uint256 points) internal {
         if (hookData.length == 0) return;
 
         address user = abi.decode(hookData, (address));
         if (user == address(0)) return;
 
-        uint256 poolIdUint = uint256(PoolId.unwrap(poolId));
-        _mint(user, poolIdUint, points, "");
+        rewardToken.mint(user, points);
     }
 }
